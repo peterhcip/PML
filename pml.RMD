@@ -1,0 +1,193 @@
+# Practical Machine Learning Course Project 
+
+## Introduction 
+Six young healthy male participants aged between 20-28 with little weight 
+lifting experience were asked to perform one set of 10 repetitions of the 
+Unilateral Dumbbell Biceps Curl in five different fashions: 
+* Class A – exactly according to the specification 
+* Class B – throwing the elbows to the front 
+* Class C – lifting the dumbbell only halfway 
+* Class D – lowering the dumbbell only halfway 
+* Class E – throwing the hips to the front
+
+Class A corresponds to the specified execution of the exercise, while the 
+other 4 classes correspond to common mistakes. Participants were supervised 
+by an experienced weight lifter to make sure the execution complied with the 
+manner they were supposed to simulate. 
+  
+The goal of this project is to assess whether we could detect mistakes in 
+weight-lifting exercises, i.e. identify in which of the 5 fashions (classes) 
+the exercise has actually been carried out, from motion data captured in 
+sensors worn by the participants. 
+  
+Four 9-DOF Razor inertial measurement units (IMU) were mounted respectively 
+in the participants' glove, armband, lumbar belt and dumbbell, each providing 
+three-axes acceleration, gyroscope and magnetometer data.  All captured data 
+were recorded in a data set consisting of over 39,000 observations of 160 
+variables.  For the purpose of this project, a training data set consisting of 
+19,622 observations is available for analysis.  
+
+In the following sections, we will describe how:
+* the training data set is first cleaned and subdivided into a training and a 
+testing set for cross validation (data preparation)
+* the data in the training set only is explored to understand the 
+characteristics and inter-relationship of the variables (data exploration)
+* appropriate ML models are chosen and built (model building)
+* the chosen ML models are used to make predictions on observations in the 
+testing set and estimate their accuracy (cross validation and out-of-sample 
+error)
+* the best trained ML model is used to predict the 20 test cases in Part 2 of the project
+
+## Data preparation
+The training data set consists of 160 variables, of which 67 have NAs and 33 
+have missing values in 98% of the observations.  Besides, the first 7 
+variables, namely serial number, user_name, raw_timestamp_part_1, 
+raw_timestamp_part_2, cvtd_timestamp, new_window and num_window, do not contain 
+information related to the manner in which the exercise was carried out. 
+  
+All these 107 (67 + 33 + 7) variables are first removed, leaving us with 53 
+(160 – 107) variables in the data set, i.e. 1 outcome variable (classe) and 
+52 other variables that can be used as predictors. 
+  
+To allow us to do cross validation and estimate out-of-sample error during 
+training, 75% of the observations in the training data set are randomly 
+sampled for training, leaving the remaining 25% for testing.  Care is taken to 
+set a seed for the random number generator prior to sampling to ensure that 
+the results are reproducible. 
+
+```{r DataPrep, echo=FALSE}
+library(AppliedPredictiveModeling)
+library(caret)
+pml <- read.csv("pml-training.csv")
+pml <- pml[,c(8:11,37:49,60:68,84:86,102,113:124,140,151:160)]
+set.seed(1234)
+inTrain <- createDataPartition(y=pml$classe, p = 0.75, list=F)
+training <- pml[ inTrain,]
+testing <- pml[-inTrain,]
+```
+
+## Data exploration
+The goal of the project is to identify the fashion in which the exercise was 
+carried out.  It is easy to imagine that some particular ways of carrying out 
+the exercise would produce motion data quite different from those produced by 
+other ways of carrying out the exercise.  As an example, only class E 
+involved throwing the hips to the front, while no hip movement is expected in 
+classes A to D.  The values of roll_belt, pitch_belt and yaw_belt in class E 
+are therefore expected to be quite different from those in classes A to D.  
+  
+Density plots for these 3 variables show that this is indeed the case.
+
+```{r DensityPlot, fig.height=3, echo=FALSE}
+library(ggplot2)
+qplot(roll_belt, colour=classe, data=training, geom="density")
+qplot(pitch_belt, colour=classe, data=training, geom="density")
+qplot(yaw_belt, colour=classe, data=training, geom="density")
+```
+
+In addition, if we apply pair-wise feature plots of these 3 variables with the 
+variable "classe" shown in different colours, clustering is quite obvious. 
+  
+```{r FeaturePlot, fig.height=5, echo=FALSE}
+featurePlot(x=training[,c("roll_belt","yaw_belt","pitch_belt")], y=training$classe, plot="pairs")
+```
+  
+Similar differences in other motion data values generated from different 
+classes can be expected. 
+
+## Model building
+As seen in the density and pair-wise feature plots above, the variables are 
+not related in a linear manner and classification models using decision trees 
+are expected to be more suitable.  For such models, transformations prior to 
+training are not necessary as monotone transformations (order unchanged) will 
+produce the same splits. 
+  
+The following 4 different tree models are built with default settings, using 
+data in the training data set only: 
+* randomForest (randomForest package)
+* cforest (party package)
+* rpart (rpart package)
+* gbm (boosting with trees) 
+    
+In all the models, “classe” is the outcome variable and all the remaining 52 
+variables are used as predictors. 
+  
+The user times required to train the different models vary quite drastically 
+and are, in ascending order, rpart (3s), randomForest (47s), cforest (554s) 
+and gbm (2070s).  The sizes of the trained models are also very different. 
+They are in ascending order rpart (1.0MB), gbm (21.2MB), randomForest 
+(28.6MB) and cforest (920.3MB).
+
+## Cross-validation and out of sample error
+The trained models are used to make predictions on the testing data set, and 
+the accuracies (1 – out-of-sample error) are found to be: 
+* randomForest – 99.5%
+* cforest - 96.4%
+* rpart – 73.0%
+* gbm – 96.4%
+  
+It can be seen that randomForest is the second fastest and most accurate 
+model.  As the out-of-sample error of the best model is only 0.5%, it is 
+considered not necessary to explore other models or to carry out any model 
+ensembling to further improve the accuracy. 
+  
+The confusion matrices of the 4 models used are given below for easy 
+reference. 
+   
+*randomForest confusion matrix*
+```{r rf, echo=FALSE}
+library(randomForest)
+tree1 <- randomForest(classe ~., data=training)
+pd1 <- predict(tree1, newdata=testing)
+confusionMatrix(pd1,testing$classe)
+```
+  
+*cforest confusion matrix*
+```{r cforest, echo=FALSE}
+library(party)
+tree2 <- cforest(classe ~., data=training)
+pd2 <- predict(tree2, newdata=testing)
+confusionMatrix(pd2,testing$classe)
+```
+  
+*rpart confusion matrix*
+```{r rpart, echo=FALSE}
+library(rpart)
+tree3 <- rpart(classe ~., data=training)
+pd3 <- predict(tree3, newdata=testing)
+pd3df <- data.frame(pd3)
+pd3a <- testing$classe
+for (i in 1:length(pd3a)) {
+  pd3a[i] <- NA
+  if (pd3df[i,"A"]>0.5) {pd3a[i]<-"A"}
+  if (pd3df[i,"B"]>0.5) {pd3a[i]<-"B"}
+  if (pd3df[i,"C"]>0.5) {pd3a[i]<-"C"}
+  if (pd3df[i,"D"]>0.5) {pd3a[i]<-"D"}
+  if (pd3df[i,"E"]>0.5) {pd3a[i]<-"E"}
+}
+Prediction <- pd3a
+x <- table(Prediction, testing$classe)
+print(x)
+x <- data.frame(x)
+acc <- (x$Freq[1] + x$Freq[7] + x$Freq[13] + x$Freq[19] + x$Freq[25]) / length(Prediction)
+print(paste("Accuracy :", signif(acc,4)))
+```
+  
+*gbm confusion matrix*
+```{r gbm1, echo=FALSE, results='hide'}
+tree4 <- train(classe ~., data=training, method="gbm")
+pd4 <- predict(tree4, newdata=testing)
+```
+```{r gbm2, echo=FALSE}
+confusionMatrix(pd4,testing$classe)
+``` 
+
+## Prediction of 20 test cases in Part 2 of the project 
+The randomForest model is used to predict 20 test cases in Part 2 of the 
+project.  As expected, all 20 predictions are found to be correct in the first 
+attempt. 
+```{r validation, echo=FALSE}
+validation <- read.csv("pml-testing.csv")
+validation <- validation[,c(8:11,37:49,60:68,84:86,102,113:124,140,151:160)]
+pd1a <- predict(tree1, newdata=validation)
+print(pd1a)
+```
